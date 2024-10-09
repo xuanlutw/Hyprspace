@@ -282,6 +282,9 @@ void onTouchUp(void* thisptr, SCallbackInfo& info, std::any args) {
 
 void dispatchToggleOverview(std::string arg) {
     auto currentMonitor = g_pCompositor->getMonitorFromCursor();
+    if (!arg.empty()) {
+        currentMonitor = g_pCompositor->getMonitorFromName(arg);
+    }
     auto widget = getWidgetForMonitor(currentMonitor);
     if (widget) {
         if (arg.contains("all")) {

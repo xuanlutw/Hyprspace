@@ -1,7 +1,7 @@
 #include "Overview.hpp"
 #include "Globals.hpp"
 
-void renderWindowStub(PHLWINDOW pWindow, CMonitor* pMonitor, PHLWORKSPACE pWorkspaceOverride, CBox rectOverride, timespec* time) {
+void renderWindowStub(PHLWINDOW pWindow, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspaceOverride, CBox rectOverride, timespec* time) {
     if (!pWindow || !pMonitor || !pWorkspaceOverride || !time) return;
 
     const auto oWorkspace = pWindow->m_pWorkspace;
@@ -14,7 +14,6 @@ void renderWindowStub(PHLWINDOW pWindow, CMonitor* pMonitor, PHLWORKSPACE pWorks
     const auto oDragMode = g_pInputManager->dragMode;
     const auto oRenderModifEnable = g_pHyprOpenGL->m_RenderData.renderModif.enabled;
     const auto oFloating = pWindow->m_bIsFloating;
-    const auto oSpecialRounding = pWindow->m_sWindowData.rounding;
 
     const float curScaling = rectOverride.w / (oSize.x * pMonitor->scale);
 
@@ -24,11 +23,11 @@ void renderWindowStub(PHLWINDOW pWindow, CMonitor* pMonitor, PHLWORKSPACE pWorks
     g_pHyprOpenGL->m_RenderData.renderModif.modifs.push_back({SRenderModifData::eRenderModifType::RMOD_TYPE_SCALE, curScaling});
     g_pHyprOpenGL->m_RenderData.renderModif.enabled = true;
     pWindow->m_pWorkspace = pWorkspaceOverride;
-    pWindow->m_sFullscreenState = sFullscreenState(FSMODE_NONE); // FIXME: still do nothing, fullscreen requests not reject when overview active
+    pWindow->m_sFullscreenState = sFullscreenState{FSMODE_NONE}; // FIXME: still do nothing, fullscreen requests not reject when overview active
     pWindow->m_sWindowData.nearestNeighbor = false; // FIX: this wont do, need to scale surface texture down properly so that windows arent shown as pixelated mess
     pWindow->m_bIsFloating = false; // weird shit happened so hack fix
     pWindow->m_bPinned = true;
-    pWindow->m_sWindowData.rounding = pWindow->rounding() * pMonitor->scale * curScaling;
+    pWindow->m_sWindowData.rounding = CWindowOverridableVar<int>(pWindow->rounding() * curScaling * pMonitor->scale, eOverridePriority::PRIORITY_SET_PROP);
     g_pInputManager->currentlyDraggedWindow = pWindow; // override these and force INTERACTIVERESIZEINPROGRESS = true to trick the renderer
     g_pInputManager->dragMode = MBIND_RESIZE;
 
@@ -42,7 +41,7 @@ void renderWindowStub(PHLWINDOW pWindow, CMonitor* pMonitor, PHLWORKSPACE pWorks
     pWindow->m_sWindowData.nearestNeighbor = oUseNearestNeighbor;
     pWindow->m_bIsFloating = oFloating;
     pWindow->m_bPinned = oPinned;
-    pWindow->m_sWindowData.rounding = oSpecialRounding;
+    pWindow->m_sWindowData.rounding.unset(eOverridePriority::PRIORITY_SET_PROP);
     g_pInputManager->currentlyDraggedWindow = oDraggedWindow;
     g_pInputManager->dragMode = oDragMode;
     g_pHyprOpenGL->m_RenderData.renderModif.enabled = oRenderModifEnable;
@@ -50,7 +49,7 @@ void renderWindowStub(PHLWINDOW pWindow, CMonitor* pMonitor, PHLWORKSPACE pWorks
     g_pHyprOpenGL->m_RenderData.renderModif.modifs.pop_back();
 }
 
-void renderLayerStub(Hyprutils::Memory::CWeakPointer<CLayerSurface> pLayer, CMonitor* pMonitor, CBox rectOverride, timespec* time) {
+void renderLayerStub(Hyprutils::Memory::CWeakPointer<CLayerSurface> pLayer, PHLMONITOR pMonitor, CBox rectOverride, timespec* time) {
     if (!pLayer || !pMonitor || !time) return;
 
     if (!pLayer->mapped || pLayer->readyToDelete || !pLayer->layerSurface) return;
@@ -98,30 +97,30 @@ void CHyprspaceWidget::draw() {
     //g_pHyprOpenGL->markBlurDirtyForMonitor(owner);
     //g_pHyprOpenGL->preRender(owner);
 
-	int bottomInvert = 1;
-	if (Config::onBottom) bottomInvert = -1;
+    int bottomInvert = 1;
+    if (Config::onBottom) bottomInvert = -1;
 
-	// Background box
+    // Background box
     CBox widgetBox = {owner->vecPosition.x, owner->vecPosition.y + (Config::onBottom * (owner->vecTransformedSize.y - ((Config::panelHeight + Config::reservedArea) * owner->scale))) - (bottomInvert * curYOffset.value()), owner->vecTransformedSize.x, (Config::panelHeight + Config::reservedArea) * owner->scale}; //TODO: update size on monitor change
-    
+
     // set widgetBox relative to current monitor for rendering panel
     widgetBox.x -= owner->vecPosition.x;
     widgetBox.y -= owner->vecPosition.y;
-    
+
     g_pHyprOpenGL->m_RenderData.clipBox = CBox({0, 0}, owner->vecTransformedSize);
     g_pHyprOpenGL->renderRectWithBlur(&widgetBox, Config::panelBaseColor);
 
     // Panel Border
-     if (Config::panelBorderWidth > 0) {
+    if (Config::panelBorderWidth > 0) {
         // Border box
-        CBox borderBox = {widgetBox.x, owner->vecPosition.y + (Config::onBottom * owner->vecTransformedSize.y) + (Config::panelHeight + Config::reservedArea - curYOffset.value()* owner->scale) * bottomInvert, owner->vecTransformedSize.x, Config::panelBorderWidth};
+        CBox borderBox = {widgetBox.x, owner->vecPosition.y + (Config::onBottom * owner->vecTransformedSize.y) + (Config::panelHeight + Config::reservedArea - curYOffset.value() * owner->scale) * bottomInvert, owner->vecTransformedSize.x, Config::panelBorderWidth};
         borderBox.y -= owner->vecPosition.y;
-        
+
         g_pHyprOpenGL->renderRect(&borderBox, Config::panelBorderColor);
     }
 
 
-	g_pHyprRenderer->damageBox(&widgetBox);
+    g_pHyprRenderer->damageBox(&widgetBox);
 
     g_pHyprOpenGL->m_RenderData.clipBox = CBox();
 
@@ -138,7 +137,7 @@ void CHyprspaceWidget::draw() {
         if (!ws) continue;
         // normal workspaces start from 1, special workspaces ends on -2
         if (ws->m_iID < 1) continue;
-        if (ws->m_iMonitorID == ownerID) {
+        if (ws->m_pMonitor->ID == ownerID) {
             workspaces.push_back(ws->m_iID);
             if (highestID < ws->m_iID) highestID = ws->m_iID;
             if (lowestID > ws->m_iID) lowestID = ws->m_iID;

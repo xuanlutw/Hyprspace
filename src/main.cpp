@@ -74,7 +74,7 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
 
-std::shared_ptr<CHyprspaceWidget> getWidgetForMonitor(CMonitor* pMonitor) {
+std::shared_ptr<CHyprspaceWidget> getWidgetForMonitor(PHLMONITORREF pMonitor) {
     for (auto& widget : g_overviewWidgets) {
         if (!widget) continue;
         if (!widget->getOwner()) continue;
@@ -158,7 +158,7 @@ void onWorkspaceChange(void* thisptr, SCallbackInfo& info, std::any args) {
     const auto pWorkspace = std::any_cast<PHLWORKSPACE>(args);
     if (!pWorkspace) return;
 
-    auto widget = getWidgetForMonitor(g_pCompositor->getMonitorFromID(pWorkspace->m_iMonitorID));
+    auto widget = getWidgetForMonitor(g_pCompositor->getMonitorFromID(pWorkspace->m_pMonitor->ID));
     if (widget != nullptr)
         if (widget->isActive())
             widget->show();
@@ -253,27 +253,29 @@ void onKeyPress(void* thisptr, SCallbackInfo& info, std::any args) {
     //const auto k = std::any_cast<SKeyboard*>(std::any_cast<std::unordered_map<std::string, std::any>>(args)["keyboard"]);
 
     if (e.keycode == KEY_ESC) {
-        const auto widget = getWidgetForMonitor(g_pCompositor->getMonitorFromCursor());
-        if (widget != nullptr)
-            if (widget->isActive()) {
-                widget->hide();
-                info.cancelled = true;
-            }
+        // close all panels
+        for (auto& widget : g_overviewWidgets) {
+            if (widget != nullptr)
+                if (widget->isActive()) {
+                    widget->hide();
+                    info.cancelled = true;
+                }
+        }
     }
 }
 
 void onTouchDown(void* thisptr, SCallbackInfo& info, std::any args) {
-    const auto e = std::any_cast<ITouch::SDownEvent*>(args);
-    const auto targetMonitor = g_pCompositor->getMonitorFromName(e->device ? e->device->deviceName : "");
+    const auto e = std::any_cast<ITouch::SDownEvent>(args);
+    const auto targetMonitor = g_pCompositor->getMonitorFromName(e.device ? e.device->deviceName : "");
     const auto widget = getWidgetForMonitor(targetMonitor);
     if (widget != nullptr && targetMonitor != nullptr)
         if (widget->isActive())
-            info.cancelled = !widget->buttonEvent(true, { targetMonitor->vecPosition.x + e->pos.x * targetMonitor->vecSize.x, targetMonitor->vecPosition.y + e->pos.y * targetMonitor->vecSize.y });
+            info.cancelled = !widget->buttonEvent(true, { targetMonitor->vecPosition.x + e.pos.x * targetMonitor->vecSize.x, targetMonitor->vecPosition.y + e.pos.y * targetMonitor->vecSize.y });
 }
 
 void onTouchUp(void* thisptr, SCallbackInfo& info, std::any args) {
-    const auto e = std::any_cast<ITouch::SUpEvent*>(args);
-    const auto targetMonitor = g_pCompositor->getMonitorFromID(e->touchID);
+    const auto e = std::any_cast<ITouch::SUpEvent>(args);
+    const auto targetMonitor = g_pCompositor->getMonitorFromID(e.touchID);
     const auto widget = getWidgetForMonitor(targetMonitor);
     if (widget != nullptr && targetMonitor != nullptr)
         if (widget->isActive())
@@ -408,7 +410,7 @@ void reloadConfig() {
 void registerMonitors() {
     // create a widget for each monitor
     for (auto& m : g_pCompositor->m_vMonitors) {
-        if (getWidgetForMonitor(m.get()) != nullptr) continue;
+        if (getWidgetForMonitor(m) != nullptr) continue;
         CHyprspaceWidget* widget = new CHyprspaceWidget(m->ID);
         g_overviewWidgets.emplace_back(widget);
     }

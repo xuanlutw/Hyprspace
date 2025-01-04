@@ -11,12 +11,12 @@ void* pRenderLayer;
 std::vector<std::shared_ptr<CHyprspaceWidget>> g_overviewWidgets;
 
 
-CColor Config::panelBaseColor = CColor(0, 0, 0, 0);
-CColor Config::panelBorderColor = CColor(0, 0, 0, 0);
-CColor Config::workspaceActiveBackground = CColor(0, 0, 0, 0.25);
-CColor Config::workspaceInactiveBackground = CColor(0, 0, 0, 0.5);
-CColor Config::workspaceActiveBorder = CColor(1, 1, 1, 0.3);
-CColor Config::workspaceInactiveBorder = CColor(1, 1, 1, 0);
+CHyprColor Config::panelBaseColor = CHyprColor(0, 0, 0, 0);
+CHyprColor Config::panelBorderColor = CHyprColor(0, 0, 0, 0);
+CHyprColor Config::workspaceActiveBackground = CHyprColor(0, 0, 0, 0.25);
+CHyprColor Config::workspaceInactiveBackground = CHyprColor(0, 0, 0, 0.5);
+CHyprColor Config::workspaceActiveBorder = CHyprColor(1, 1, 1, 0.3);
+CHyprColor Config::workspaceInactiveBorder = CHyprColor(1, 1, 1, 0);
 
 int Config::panelHeight = 250;
 int Config::panelBorderWidth = 2;
@@ -48,6 +48,8 @@ bool Config::showSpecialWorkspace = false;
 
 bool Config::disableGestures = false;
 bool Config::reverseSwipe = false;
+
+bool Config::disableBlur = false;
 
 float Config::overrideAnimSpeed = 0;
 
@@ -282,7 +284,7 @@ void onTouchUp(void* thisptr, SCallbackInfo& info, std::any args) {
             info.cancelled = !widget->buttonEvent(false, g_pInputManager->getMouseCoordsInternal());
 }
 
-void dispatchToggleOverview(std::string arg) {
+static SDispatchResult dispatchToggleOverview(std::string arg) {
     auto currentMonitor = g_pCompositor->getMonitorFromCursor();
     if (!arg.empty()) {
         currentMonitor = g_pCompositor->getMonitorFromName(arg);
@@ -308,9 +310,10 @@ void dispatchToggleOverview(std::string arg) {
         else
             widget->isActive() ? widget->hide() : widget->show();
     }
+    return SDispatchResult{};
 }
 
-void dispatchOpenOverview(std::string arg) {
+static SDispatchResult dispatchOpenOverview(std::string arg) {
     if (arg.contains("all")) {
         for (auto& widget : g_overviewWidgets) {
             if (!widget->isActive()) widget->show();
@@ -322,9 +325,10 @@ void dispatchOpenOverview(std::string arg) {
         if (widget)
             if (!widget->isActive()) widget->show();
     }
+    return SDispatchResult{};
 }
 
-void dispatchCloseOverview(std::string arg) {
+static SDispatchResult dispatchCloseOverview(std::string arg) {
     if (arg.contains("all")) {
         for (auto& widget : g_overviewWidgets) {
             if (widget->isActive()) widget->hide();
@@ -336,6 +340,7 @@ void dispatchCloseOverview(std::string arg) {
         if (widget)
             if (widget->isActive()) widget->hide();
     }
+    return SDispatchResult{};
 }
 
 void* findFunctionBySymbol(HANDLE inHandle, const std::string func, const std::string sym) {
@@ -349,12 +354,12 @@ void* findFunctionBySymbol(HANDLE inHandle, const std::string func, const std::s
 }
 
 void reloadConfig() {
-    Config::panelBaseColor = CColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:panelColor")->getValue()));
-    Config::panelBorderColor = CColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:panelBorderColor")->getValue()));
-    Config::workspaceActiveBackground = CColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceActiveBackground")->getValue()));
-    Config::workspaceInactiveBackground = CColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceInactiveBackground")->getValue()));
-    Config::workspaceActiveBorder = CColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceActiveBorder")->getValue()));
-    Config::workspaceInactiveBorder = CColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceInactiveBorder")->getValue()));
+    Config::panelBaseColor = CHyprColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:panelColor")->getValue()));
+    Config::panelBorderColor = CHyprColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:panelBorderColor")->getValue()));
+    Config::workspaceActiveBackground = CHyprColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceActiveBackground")->getValue()));
+    Config::workspaceInactiveBackground = CHyprColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceInactiveBackground")->getValue()));
+    Config::workspaceActiveBorder = CHyprColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceActiveBorder")->getValue()));
+    Config::workspaceInactiveBorder = CHyprColor(std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:workspaceInactiveBorder")->getValue()));
 
     Config::panelHeight = std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:panelHeight")->getValue());
     Config::panelBorderWidth = std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:panelBorderWidth")->getValue());
@@ -386,6 +391,8 @@ void reloadConfig() {
 
     Config::disableGestures = std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:disableGestures")->getValue());
     Config::reverseSwipe = std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:reverseSwipe")->getValue());
+
+    Config::disableBlur = std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:disableBlur")->getValue());
 
     Config::overrideAnimSpeed = std::any_cast<Hyprlang::FLOAT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:overrideAnimSpeed")->getValue());
 
@@ -421,12 +428,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE inHandle) {
 
     Debug::log(LOG, "Loading overview plugin");
 
-    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:panelColor", Hyprlang::INT{CColor(0, 0, 0, 0).getAsHex()});
-    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:panelBorderColor", Hyprlang::INT{CColor(0, 0, 0, 0).getAsHex()});
-    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceActiveBackground", Hyprlang::INT{CColor(0, 0, 0, 0.25).getAsHex()});
-    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceInactiveBackground", Hyprlang::INT{CColor(0, 0, 0, 0.5).getAsHex()});
-    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceActiveBorder", Hyprlang::INT{CColor(1, 1, 1, 0.25).getAsHex()});
-    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceInactiveBorder", Hyprlang::INT{CColor(1, 1, 1, 0).getAsHex()});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:panelColor", Hyprlang::INT{CHyprColor(0, 0, 0, 0).getAsHex()});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:panelBorderColor", Hyprlang::INT{CHyprColor(0, 0, 0, 0).getAsHex()});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceActiveBackground", Hyprlang::INT{CHyprColor(0, 0, 0, 0.25).getAsHex()});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceInactiveBackground", Hyprlang::INT{CHyprColor(0, 0, 0, 0.5).getAsHex()});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceActiveBorder", Hyprlang::INT{CHyprColor(1, 1, 1, 0.25).getAsHex()});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:workspaceInactiveBorder", Hyprlang::INT{CHyprColor(1, 1, 1, 0).getAsHex()});
 
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:panelHeight", Hyprlang::INT{250});
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:panelBorderWidth", Hyprlang::INT{2});
@@ -459,15 +466,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE inHandle) {
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:disableGestures", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:reverseSwipe", Hyprlang::INT{0});
 
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:disableBlur", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:overrideAnimSpeed", Hyprlang::FLOAT{0.0});
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:dragAlpha", Hyprlang::FLOAT{0.2});
 
     g_pConfigReloadHook = HyprlandAPI::registerCallbackDynamic(pHandle, "configReloaded", [&] (void* thisptr, SCallbackInfo& info, std::any data) { reloadConfig(); });
     HyprlandAPI::reloadConfig();
 
-    HyprlandAPI::addDispatcher(pHandle, "overview:toggle", dispatchToggleOverview);
-    HyprlandAPI::addDispatcher(pHandle, "overview:open", dispatchOpenOverview);
-    HyprlandAPI::addDispatcher(pHandle, "overview:close", dispatchCloseOverview);
+    HyprlandAPI::addDispatcherV2(pHandle, "overview:toggle", ::dispatchToggleOverview);
+    HyprlandAPI::addDispatcherV2(pHandle, "overview:open", ::dispatchOpenOverview);
+    HyprlandAPI::addDispatcherV2(pHandle, "overview:close", ::dispatchCloseOverview);
 
     g_pRenderHook = HyprlandAPI::registerCallbackDynamic(pHandle, "render", onRender);
 

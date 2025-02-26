@@ -121,8 +121,8 @@ void onRender(void* thisptr, SCallbackInfo& info, std::any args) {
                 //widget->draw();
                 if (const auto curWindow = g_pInputManager->currentlyDraggedWindow.lock()) {
                     if (widget->isActive()) {
-                        g_oAlpha = curWindow->m_fActiveInactiveAlpha.goal();
-                        curWindow->m_fActiveInactiveAlpha.setValueAndWarp(0); // HACK: hide dragged window for the actual pass
+                        g_oAlpha = curWindow->m_fActiveInactiveAlpha->goal();
+                        curWindow->m_fActiveInactiveAlpha->setValueAndWarp(0); // HACK: hide dragged window for the actual pass
                     }
                 }
                 else g_oAlpha = -1;
@@ -140,11 +140,13 @@ void onRender(void* thisptr, SCallbackInfo& info, std::any args) {
                 widget->draw();
                 if (g_oAlpha != -1) {
                     if (const auto curWindow = g_pInputManager->currentlyDraggedWindow.lock()) {
-                        curWindow->m_fActiveInactiveAlpha.setValueAndWarp(Config::dragAlpha);
+                        curWindow->m_fActiveInactiveAlpha->setValueAndWarp(Config::dragAlpha);
+                        curWindow->m_sWindowData.noBlur = CWindowOverridableVar<bool>(true, eOverridePriority::PRIORITY_SET_PROP);
                         timespec time;
                         clock_gettime(CLOCK_MONOTONIC, &time);
                         (*(tRenderWindow)pRenderWindow)(g_pHyprRenderer.get(), curWindow, widget->getOwner(), &time, true, RENDER_PASS_MAIN, false, false);
-                        curWindow->m_fActiveInactiveAlpha.setValueAndWarp(g_oAlpha);
+                        curWindow->m_sWindowData.noBlur.unset(eOverridePriority::PRIORITY_SET_PROP);
+                        curWindow->m_fActiveInactiveAlpha->setValueAndWarp(g_oAlpha);
                     }
                 }
                 g_oAlpha = -1;
@@ -473,9 +475,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE inHandle) {
     g_pConfigReloadHook = HyprlandAPI::registerCallbackDynamic(pHandle, "configReloaded", [&] (void* thisptr, SCallbackInfo& info, std::any data) { reloadConfig(); });
     HyprlandAPI::reloadConfig();
 
-    HyprlandAPI::addDispatcherV2(pHandle, "overview:toggle", ::dispatchToggleOverview);
-    HyprlandAPI::addDispatcherV2(pHandle, "overview:open", ::dispatchOpenOverview);
-    HyprlandAPI::addDispatcherV2(pHandle, "overview:close", ::dispatchCloseOverview);
+    HyprlandAPI::addDispatcher(pHandle, "overview:toggle", ::dispatchToggleOverview);
+    HyprlandAPI::addDispatcher(pHandle, "overview:open", ::dispatchOpenOverview);
+    HyprlandAPI::addDispatcher(pHandle, "overview:close", ::dispatchCloseOverview);
 
     g_pRenderHook = HyprlandAPI::registerCallbackDynamic(pHandle, "render", onRender);
 

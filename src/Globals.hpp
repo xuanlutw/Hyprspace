@@ -2,6 +2,10 @@
 
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/managers/LayoutManager.hpp>
+#include <hyprland/src/managers/AnimationManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 
 inline HANDLE pHandle = NULL;
@@ -11,9 +15,8 @@ extern void* pMouseKeybind;
 
 typedef void (*tRenderWindow)(void*, PHLWINDOW, PHLMONITOR, timespec*, bool, eRenderPassMode, bool, bool);
 extern void* pRenderWindow;
-typedef void (*tRenderLayer)(void*, Hyprutils::Memory::CWeakPointer<CLayerSurface>, PHLMONITOR, timespec*, bool);
+typedef void (*tRenderLayer)(void*, PHLLSREF, PHLMONITOR, timespec*, bool);
 extern void* pRenderLayer;
-
 namespace Config {
     extern CHyprColor panelBaseColor;
     extern CHyprColor panelBorderColor;

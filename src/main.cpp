@@ -64,6 +64,7 @@ Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pCloseLayerHook;
 Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pMouseButtonHook;
 Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pMouseAxisHook;
 Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pTouchDownHook;
+Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pTouchMoveHook;
 Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pTouchUpHook;
 Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pSwipeBeginHook;
 Hyprutils::Memory::CSharedPointer<HOOK_CALLBACK_FN> g_pSwipeUpdateHook;
@@ -115,14 +116,14 @@ void onRender(void* thisptr, SCallbackInfo& info, std::any args) {
     else if (renderStage == eRenderStage::RENDER_PRE_WINDOWS) {
 
 
-        const auto widget = getWidgetForMonitor(g_pHyprOpenGL->m_RenderData.pMonitor);
+        const auto widget = getWidgetForMonitor(g_pHyprOpenGL->m_renderData.pMonitor);
         if (widget != nullptr)
             if (widget->getOwner()) {
                 //widget->draw();
-                if (const auto curWindow = g_pInputManager->currentlyDraggedWindow.lock()) {
+                if (const auto curWindow = g_pInputManager->m_currentlyDraggedWindow.lock()) {
                     if (widget->isActive()) {
-                        g_oAlpha = curWindow->m_fActiveInactiveAlpha->goal();
-                        curWindow->m_fActiveInactiveAlpha->setValueAndWarp(0); // HACK: hide dragged window for the actual pass
+                        g_oAlpha = curWindow->m_activeInactiveAlpha->goal();
+                        curWindow->m_activeInactiveAlpha->setValueAndWarp(0); // HACK: hide dragged window for the actual pass
                     }
                 }
                 else g_oAlpha = -1;
@@ -133,20 +134,20 @@ void onRender(void* thisptr, SCallbackInfo& info, std::any args) {
     }
     else if (renderStage == eRenderStage::RENDER_POST_WINDOWS) {
 
-        const auto widget = getWidgetForMonitor(g_pHyprOpenGL->m_RenderData.pMonitor);
+        const auto widget = getWidgetForMonitor(g_pHyprOpenGL->m_renderData.pMonitor);
 
         if (widget != nullptr)
             if (widget->getOwner()) {
                 widget->draw();
                 if (g_oAlpha != -1) {
-                    if (const auto curWindow = g_pInputManager->currentlyDraggedWindow.lock()) {
-                        curWindow->m_fActiveInactiveAlpha->setValueAndWarp(Config::dragAlpha);
-                        curWindow->m_sWindowData.noBlur = CWindowOverridableVar<bool>(true, eOverridePriority::PRIORITY_SET_PROP);
+                    if (const auto curWindow = g_pInputManager->m_currentlyDraggedWindow.lock()) {
+                        curWindow->m_activeInactiveAlpha->setValueAndWarp(Config::dragAlpha);
+                        curWindow->m_windowData.noBlur = CWindowOverridableVar<bool>(true, eOverridePriority::PRIORITY_SET_PROP);
                         timespec time;
                         clock_gettime(CLOCK_MONOTONIC, &time);
                         (*(tRenderWindow)pRenderWindow)(g_pHyprRenderer.get(), curWindow, widget->getOwner(), &time, true, RENDER_PASS_MAIN, false, false);
-                        curWindow->m_sWindowData.noBlur.unset(eOverridePriority::PRIORITY_SET_PROP);
-                        curWindow->m_fActiveInactiveAlpha->setValueAndWarp(g_oAlpha);
+                        curWindow->m_windowData.noBlur.unset(eOverridePriority::PRIORITY_SET_PROP);
+                        curWindow->m_activeInactiveAlpha->setValueAndWarp(g_oAlpha);
                     }
                 }
                 g_oAlpha = -1;
@@ -162,7 +163,7 @@ void onWorkspaceChange(void* thisptr, SCallbackInfo& info, std::any args) {
     const auto pWorkspace = std::any_cast<PHLWORKSPACE>(args);
     if (!pWorkspace) return;
 
-    auto widget = getWidgetForMonitor(g_pCompositor->getMonitorFromID(pWorkspace->m_pMonitor->ID));
+    auto widget = getWidgetForMonitor(g_pCompositor->getMonitorFromID(pWorkspace->m_monitor->m_id));
     if (widget != nullptr)
         if (widget->isActive())
             widget->show();
@@ -251,39 +252,73 @@ void onSwipeEnd(void* thisptr, SCallbackInfo& info, std::any args) {
         widget->endSwipe(e);
 }
 
-// atm this is only for ESC to exit
+// Close overview with configurable key
 void onKeyPress(void* thisptr, SCallbackInfo& info, std::any args) {
     const auto e = std::any_cast<IKeyboard::SKeyEvent>(std::any_cast<std::unordered_map<std::string, std::any>>(args)["event"]);
-    //const auto k = std::any_cast<SKeyboard*>(std::any_cast<std::unordered_map<std::string, std::any>>(args)["keyboard"]);
+    const auto k = std::any_cast<SP<IKeyboard>>(std::any_cast<std::unordered_map<std::string, std::any>>(args)["keyboard"]);
 
-    if (e.keycode == KEY_ESC) {
+    const auto keycode = e.keycode + 8; // Because to xkbcommon it's +8 from libinput
+    const xkb_keysym_t keysym = xkb_state_key_get_one_sym(k->m_xkbSymState, keycode);
+
+    // Get configured exit key (default to Escape if not configured)
+    const auto cfgExitKey = std::any_cast<Hyprlang::STRING>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:exitKey")->getValue());
+    const xkb_keysym_t cfgExitKeysym = xkb_keysym_from_name(cfgExitKey, XKB_KEYSYM_CASE_INSENSITIVE);
+
+    // If exit key is empty, disable keyboard exit
+    if (cfgExitKey[0] == '\0')
+        return;
+
+    if (keysym == cfgExitKeysym) {
         // close all panels
+        bool overviewActive = false;
         for (auto& widget : g_overviewWidgets) {
-            if (widget != nullptr)
-                if (widget->isActive()) {
-                    widget->hide();
-                    info.cancelled = true;
-                }
+            if (widget != nullptr && widget->isActive()) {
+                widget->hide();
+                overviewActive = true;
+            }
+        }
+        // Only cancel event if overview was active and closed
+        if (overviewActive)
+            info.cancelled = true;
+    }
+}
+
+PHLMONITOR g_pTouchedMonitor;
+
+void onTouchDown(void* thisptr, SCallbackInfo& info, std::any args) {
+    const auto e = std::any_cast<ITouch::SDownEvent>(args);
+    auto targetMonitor = g_pCompositor->getMonitorFromName(!e.device->m_boundOutput.empty() ? e.device->m_boundOutput : "");
+    targetMonitor = targetMonitor ? targetMonitor : g_pCompositor->m_lastMonitor.lock();
+
+    const auto widget = getWidgetForMonitor(targetMonitor);
+    if (widget != nullptr && targetMonitor != nullptr) {
+        if (widget->isActive()) {
+            Vector2D pos = targetMonitor->m_position + e.pos * targetMonitor->m_size;
+            info.cancelled = !widget->buttonEvent(true, pos);
+            if (info.cancelled) {
+                g_pTouchedMonitor = targetMonitor;
+                g_pCompositor->warpCursorTo(pos);
+                g_pInputManager->refocus();
+            }
         }
     }
 }
 
-void onTouchDown(void* thisptr, SCallbackInfo& info, std::any args) {
-    const auto e = std::any_cast<ITouch::SDownEvent>(args);
-    const auto targetMonitor = g_pCompositor->getMonitorFromName(e.device ? e.device->deviceName : "");
-    const auto widget = getWidgetForMonitor(targetMonitor);
-    if (widget != nullptr && targetMonitor != nullptr)
-        if (widget->isActive())
-            info.cancelled = !widget->buttonEvent(true, { targetMonitor->vecPosition.x + e.pos.x * targetMonitor->vecSize.x, targetMonitor->vecPosition.y + e.pos.y * targetMonitor->vecSize.y });
+void onTouchMove(void* thisptr, SCallbackInfo& info, std::any args) {
+    if (g_pTouchedMonitor == nullptr) return;
+
+    const auto e = std::any_cast<ITouch::SMotionEvent>(args);
+    g_pCompositor->warpCursorTo(g_pTouchedMonitor->m_position + g_pTouchedMonitor->m_size * e.pos);
+    g_pInputManager->simulateMouseMovement();
 }
 
 void onTouchUp(void* thisptr, SCallbackInfo& info, std::any args) {
-    const auto e = std::any_cast<ITouch::SUpEvent>(args);
-    const auto targetMonitor = g_pCompositor->getMonitorFromID(e.touchID);
-    const auto widget = getWidgetForMonitor(targetMonitor);
-    if (widget != nullptr && targetMonitor != nullptr)
+    const auto widget = getWidgetForMonitor(g_pTouchedMonitor);
+    if (widget != nullptr && g_pTouchedMonitor != nullptr)
         if (widget->isActive())
             info.cancelled = !widget->buttonEvent(false, g_pInputManager->getMouseCoordsInternal());
+
+    g_pTouchedMonitor = nullptr;
 }
 
 static SDispatchResult dispatchToggleOverview(std::string arg) {
@@ -397,6 +432,8 @@ void reloadConfig() {
     Config::disableBlur = std::any_cast<Hyprlang::INT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:disableBlur")->getValue());
 
     Config::overrideAnimSpeed = std::any_cast<Hyprlang::FLOAT>(HyprlandAPI::getConfigValue(pHandle, "plugin:overview:overrideAnimSpeed")->getValue());
+    
+    // We don't need to store exitKey in Config namespace as it's only used in onKeyPress
 
     for (auto& widget : g_overviewWidgets) {
         widget->updateConfig();
@@ -418,9 +455,9 @@ void reloadConfig() {
 
 void registerMonitors() {
     // create a widget for each monitor
-    for (auto& m : g_pCompositor->m_vMonitors) {
+    for (auto& m : g_pCompositor->m_monitors) {
         if (getWidgetForMonitor(m) != nullptr) continue;
-        CHyprspaceWidget* widget = new CHyprspaceWidget(m->ID);
+        CHyprspaceWidget* widget = new CHyprspaceWidget(m->m_id);
         g_overviewWidgets.emplace_back(widget);
     }
 }
@@ -471,6 +508,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE inHandle) {
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:disableBlur", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:overrideAnimSpeed", Hyprlang::FLOAT{0.0});
     HyprlandAPI::addConfigValue(pHandle, "plugin:overview:dragAlpha", Hyprlang::FLOAT{0.2});
+    HyprlandAPI::addConfigValue(pHandle, "plugin:overview:exitKey", Hyprlang::STRING{"Escape"});
 
     g_pConfigReloadHook = HyprlandAPI::registerCallbackDynamic(pHandle, "configReloaded", [&] (void* thisptr, SCallbackInfo& info, std::any data) { reloadConfig(); });
     HyprlandAPI::reloadConfig();
@@ -493,6 +531,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE inHandle) {
     g_pMouseAxisHook = HyprlandAPI::registerCallbackDynamic(pHandle, "mouseAxis", onMouseAxis);
 
     g_pTouchDownHook = HyprlandAPI::registerCallbackDynamic(pHandle, "touchDown", onTouchDown);
+    g_pTouchMoveHook = HyprlandAPI::registerCallbackDynamic(pHandle, "touchMove", onTouchMove);
     g_pTouchUpHook = HyprlandAPI::registerCallbackDynamic(pHandle, "touchUp", onTouchUp);
 
     g_pSwipeBeginHook = HyprlandAPI::registerCallbackDynamic(pHandle, "swipeBegin", onSwipeBegin);
